@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+data/
+
+# Local-only candidate profile (personal; never commit). The .example.json is public.
+config/candidate_profile.json
+# Local-only sanitized profile intended for external LLM evaluation (still personal; never commit).
+config/claude_candidate_profile.json
+
+# Generated reports may contain personalized AI evaluations; never commit.
+reports/

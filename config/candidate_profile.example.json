@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "target_roles": [
+    "Example target role area",
+    "Another target role area"
+  ],
+  "preferred_locations": {
+    "primary": [
+      "Example City, ST",
+      "Remote (United States)"
+    ],
+    "secondary": [
+      "Another City, ST (hybrid only)"
+    ]
+  },
+  "years_experience": {
+    "example_discipline": 3
+  },
+  "education": [
+    {
+      "degree": "B.S.",
+      "field": "Example Field of Study",
+      "institution": "Example University",
+      "status": "completed",
+      "year": 2020
+    },
+    {
+      "degree": "M.S.",
+      "field": "Another Field of Study",
+      "institution": "Another Example University",
+      "status": "in_progress"
+    }
+  ],
+  "aerospace_experience": [
+    "Example aerospace experience area",
+    "Another aerospace experience area"
+  ],
+  "technical_skills": [
+    "Example language or tool",
+    "Another tool"
+  ],
+  "transferable_skills": [
+    "Example transferable skill"
+  ],
+  "experience_evidence": [
+    {
+      "skill": "Example capability",
+      "evidence": "Short, generalized description of how the capability was used and its outcome."
+    },
+    {
+      "skill": "Another example capability",
+      "evidence": "Another generalized description; omit employer names, program names and sensitive details."
+    }
+  ]
+}

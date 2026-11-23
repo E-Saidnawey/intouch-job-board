@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "target_roles": [
+    "Satellite payload systems engineer",
+    "Remote sensing data engineer"
+  ],
+  "preferred_locations": {
+    "primary": [
+      "New York, NY",
+      "Remote (United States)"
+    ],
+    "secondary": [
+      "Boston, MA (hybrid only)"
+    ]
+  },
+  "years_experience": {
+    "systems_engineering": 4,
+    "software_development": 3
+  },
+  "education": [
+    {
+      "degree": "B.S.",
+      "field": "Aerospace Engineering",
+      "institution": "Synthetic State University",
+      "status": "completed",
+      "year": 2019
+    }
+  ],
+  "aerospace_experience": [
+    "Spacecraft payload integration and test",
+    "Optical sensor calibration"
+  ],
+  "technical_skills": [
+    "Python",
+    "MATLAB",
+    "Requirements management"
+  ],
+  "transferable_skills": [
+    "Technical documentation",
+    "Cross-team coordination"
+  ],
+  "experience_evidence": [
+    {
+      "skill": "Sensor calibration",
+      "evidence": "Synthetic example: built a calibration pipeline that reduced test turnaround time."
+    }
+  ]
+}
