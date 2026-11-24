@@ -83,6 +83,7 @@ class FetchAshbyJobsTests(unittest.TestCase):
             "description": "About\n\nLead R&D capture efforts.\n\n- Proposals\n- Pricing",
             "application_url": f"https://jobs.ashbyhq.com/slingshot-aerospace/{UUID}/application",
             "updated_at": None,  # publishedAt is NOT an update timestamp
+            "published_at": "2026-09-15T13:57:17.235+00:00",  # ... it is the publication date
         }])
 
     def test_same_schema_as_greenhouse(self):
@@ -198,7 +199,7 @@ class FetchAshbyJobsTests(unittest.TestCase):
 
 class AshbyDispatchTests(unittest.TestCase):
     def test_ashby_is_supported(self):
-        self.assertEqual(providers.SUPPORTED_PROVIDERS, {"greenhouse", "ashby"})
+        self.assertEqual(providers.SUPPORTED_PROVIDERS, {"greenhouse", "ashby", "lever"})
 
     def test_dispatches_to_fetch_ashby_jobs(self):
         with mock.patch("src.ashby.fetch_ashby_jobs", return_value=[{"x": 1}]) as ab, \

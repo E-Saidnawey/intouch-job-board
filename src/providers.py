@@ -1,6 +1,6 @@
 """Dispatch job fetching to the right ATS provider.
 
-Supported: greenhouse, ashby. To add a provider (e.g. Lever): implement
+Supported: greenhouse, ashby, lever. To add a provider: implement
 ``fetch_<provider>_jobs(board_token, company=...)`` returning normalized job
 dicts in its own module (reusing src/ats_common.py), then register it in
 ``_PROVIDERS`` together with the exception type it raises. Config validation in
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, NamedTuple
 
-from src import ashby, greenhouse
+from src import ashby, greenhouse, lever
 
 
 class CollectionError(Exception):
@@ -33,9 +33,16 @@ def _ashby_fetch(board_token: str, company: str) -> list[dict[str, Any]]:
     return ashby.fetch_ashby_jobs(board_token, company=company)
 
 
+def _lever_fetch(board_token: str, company: str) -> list[dict[str, Any]]:
+    # Looked up at call time so tests can patch src.lever.fetch_lever_jobs.
+    # For Lever the config board_token is the site identifier (jobs.lever.co/{site}).
+    return lever.fetch_lever_jobs(board_token, company=company)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "greenhouse": _Provider(fetch=_greenhouse_fetch, error=greenhouse.GreenhouseError),
     "ashby": _Provider(fetch=_ashby_fetch, error=ashby.AshbyError),
+    "lever": _Provider(fetch=_lever_fetch, error=lever.LeverError),
 }
 
 SUPPORTED_PROVIDERS = frozenset(_PROVIDERS)

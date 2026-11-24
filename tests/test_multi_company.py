@@ -71,15 +71,34 @@ DEFAULT_BOARDS = {
 
 
 class ConfigValidationTests(unittest.TestCase):
-    def test_shipped_config_is_valid(self):
-        companies = load_config(PROJECT_ROOT / "config" / "companies.json")
-        self.assertEqual([c.board_token for c in companies],
-                         ["muonspace", "planetlabs", "astspacemobile", "leolabsinc", "slingshot-aerospace"])
-        self.assertTrue(all(c.enabled for c in companies))
-        self.assertEqual([c.ats_provider for c in companies], ["greenhouse"] * 4 + ["ashby"])
-        self.assertEqual([c.snapshot_filename for c in companies],
-                         ["muon_space_jobs.json", "planet_labs_jobs.json",
-                          "ast_spacemobile_jobs.json", "leolabs_jobs.json", "slingshot_aerospace_jobs.json"])
+    def test_example_config_template_is_valid(self):
+        # The public template ships in git; the personal config/companies.json is git-ignored.
+        companies = load_config(PROJECT_ROOT / "config" / "companies.example.json")
+        self.assertEqual({c.ats_provider for c in companies}, set(providers.SUPPORTED_PROVIDERS))
+        self.assertFalse(any(c.enabled for c in companies))      # placeholders are never collected
+        with self.assertRaisesRegex(ConfigError, "No enabled companies"):
+            select_companies(companies, all_enabled=True)
+
+    def test_local_config_is_valid_if_present(self):
+        path = PROJECT_ROOT / "config" / "companies.json"
+        if not path.exists():
+            self.skipTest("config/companies.json not present (personal, git-ignored)")
+        self.assertTrue(load_config(path))   # validates providers, duplicates, filename collisions
+
+    def test_personal_config_is_git_ignored(self):
+        text = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("config/companies.json", text)
+        self.assertNotIn("config/companies.example.json", text)
+
+    def test_missing_config_points_to_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code = collect_jobs.main(["--config", str(Path(tmp) / "companies.json"), "--all"])
+        self.assertEqual(code, 2)
+        self.assertIn("Cannot read config", err.getvalue())
+        self.assertIn("Hint: create it from the template: copy", err.getvalue())
+        self.assertIn("companies.example.json", err.getvalue())
 
     def test_invalid_configs_rejected(self):
         ok = dict(COMPANIES[0])
@@ -93,7 +112,7 @@ class ConfigValidationTests(unittest.TestCase):
             "missing token": {"companies": [{k: v for k, v in ok.items() if k != "board_token"}]},
             "missing provider": {"companies": [{**ok, "ats_provider": None}]},
             "enabled not bool": {"companies": [{**ok, "enabled": "yes"}]},
-            "unsupported provider": {"companies": [{**ok, "ats_provider": "lever"}]},
+            "unsupported provider": {"companies": [{**ok, "ats_provider": "workday"}]},
             "duplicate source": {"companies": [ok, {**ok, "name": "Other"}]},
             "duplicate name": {"companies": [ok, {**ok, "board_token": "other"}]},
             "filename collision": {"companies": [ok, {**ok, "name": "Muon-Space", "board_token": "x"}]},
@@ -104,7 +123,7 @@ class ConfigValidationTests(unittest.TestCase):
 
     def test_disabled_unsupported_provider_allowed(self):
         companies = parse_config({"companies": [
-            COMPANIES[0], {"name": "Future Co", "ats_provider": "lever", "board_token": "f", "enabled": False}]})
+            COMPANIES[0], {"name": "Future Co", "ats_provider": "workday", "board_token": "f", "enabled": False}]})
         self.assertEqual(len(companies), 2)
         self.assertEqual([c.name for c in select_companies(companies, all_enabled=True)], ["Muon Space"])
 
@@ -136,8 +155,8 @@ class ConfigValidationTests(unittest.TestCase):
 
 class DispatcherTests(unittest.TestCase):
     def test_unsupported_provider(self):
-        with self.assertRaisesRegex(CollectionError, "Unsupported ATS provider 'lever'"):
-            providers.fetch_jobs("lever", "token", company="X")
+        with self.assertRaisesRegex(CollectionError, "Unsupported ATS provider 'workday'"):
+            providers.fetch_jobs("workday", "token", company="X")
 
     def test_greenhouse_delegates_to_fetch_greenhouse_jobs(self):
         with mock.patch("src.greenhouse.fetch_greenhouse_jobs", return_value=[{"x": 1}]) as m:

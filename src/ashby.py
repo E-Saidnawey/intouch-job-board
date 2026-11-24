@@ -46,7 +46,8 @@ def normalize_job(job: dict[str, Any], company: str) -> dict[str, Any]:
 
     Raises AshbyError if the posting lacks a string ``id`` or a ``title``.
     ``updated_at`` is taken only from a genuine ``updatedAt`` field; ``publishedAt``
-    is a publication date, not an update timestamp, so it is never used.
+    is a publication date, not an update timestamp, so it is never used for
+    ``updated_at``; it is stored separately as ``published_at``.
     """
     if not isinstance(job, dict):
         raise AshbyError(f"Job entry is not an object: {job!r:.80}")
@@ -74,6 +75,8 @@ def normalize_job(job: dict[str, Any], company: str) -> dict[str, Any]:
         "description": description,
         "application_url": clean_str(job.get("applyUrl")) or clean_str(job.get("jobUrl")),
         "updated_at": clean_str(job.get("updatedAt")),
+        # Employer publication date; kept separate from updated_at.
+        "published_at": clean_str(job.get("publishedAt")),
     }
 
 

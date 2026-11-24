@@ -71,6 +71,8 @@ def normalize_job(job: dict[str, Any], company: str) -> dict[str, Any]:
         "description": html_to_text(job.get("content") if isinstance(job.get("content"), str) else None),
         "application_url": clean_str(job.get("absolute_url")),
         "updated_at": clean_str(job.get("updated_at")),
+        # Employer publication date; never derived from updated_at.
+        "published_at": clean_str(job.get("first_published")),
     }
 
 

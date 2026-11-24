@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +27,8 @@ from src.candidate_profile import DEFAULT_PROFILE, load_profile
 from tests.test_claude_evaluator import SYNTHETIC_PROFILE, fake_response, valid_evaluation
 
 FAKE_KEY = "sk-ant-test-NOT-REAL"
+# Fixture jobs are published recently so the CLI default 30-day cutoff keeps them.
+RECENTLY_PUBLISHED = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
 
 # (company, ats_job_id, title, location, active) — expected outcome in the comment.
 JOBS = [
@@ -76,7 +79,8 @@ class BatchTestCase(unittest.TestCase):
             for company, ats_id, title, location, active in jobs:
                 by_company.setdefault(company, []).append(dict(
                     ats_job_id=ats_id, title=title, location=location, description=description,
-                    application_url=f"https://example.invalid/{ats_id}", updated_at=None, _active=active))
+                    application_url=f"https://example.invalid/{ats_id}", updated_at=None,
+                    published_at=RECENTLY_PUBLISHED, _active=active))
             for company, rows in by_company.items():
                 cid = database.upsert_company(conn, company, "greenhouse", company.lower().replace(" ", ""))
                 database.upsert_jobs(conn, cid, rows)

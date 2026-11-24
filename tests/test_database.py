@@ -173,11 +173,20 @@ class UpsertJobsTests(DatabaseTestCase):
         self.assertEqual(self.row("1'; DROP TABLE jobs; --")["title"], "O'Brien \"quotes\"")
 
 
+def write_temp_config(directory: Path) -> Path:
+    """A one-company config so these tests never depend on the personal config/companies.json."""
+    path = directory / "companies.json"
+    path.write_text(json.dumps({"companies": [
+        {"name": "Muon Space", "ats_provider": "greenhouse", "board_token": "muonspace"}]}), encoding="utf-8")
+    return path
+
+
 class CollectJobsDbFlagTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         tmp = Path(self._tmp.name)
         self.out, self.db = tmp / "snap.json", tmp / "jobs.db"
+        self.config = write_temp_config(tmp)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -186,7 +195,7 @@ class CollectJobsDbFlagTests(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch("src.greenhouse.fetch_greenhouse_jobs", return_value=jobs), \
                 redirect_stdout(stdout), redirect_stderr(stderr):
-            code = collect_jobs.main(["--output", str(self.out), *extra])
+            code = collect_jobs.main(["--config", str(self.config), "--output", str(self.out), *extra])
         return code, stdout.getvalue(), stderr.getvalue()
 
     def test_db_flag_persists_and_keeps_json_snapshot(self):

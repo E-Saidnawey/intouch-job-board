@@ -5,7 +5,8 @@ Run from the project root:
     python -m src.collect_jobs --company "Muon Space"
     python -m src.collect_jobs                       # legacy default: Muon Space only
 
-Companies are defined in config/companies.json (override with --config).
+Companies are defined in config/companies.json (override with --config). That file is
+git-ignored; create it from config/companies.example.json.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from src.company_config import CompanyConfig, ConfigError, load_config, select_c
 from src.providers import CollectionError  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = PROJECT_ROOT / "config" / "companies.json"
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "companies.json"        # personal, git-ignored
+EXAMPLE_CONFIG = PROJECT_ROOT / "config" / "companies.example.json"  # public template
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_COMPANY = "Muon Space"  # used when neither --all nor --company is given
 
@@ -153,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     except ConfigError as exc:
         print(f"ERROR: configuration: {exc}", file=sys.stderr)
+        if not args.config.exists() and EXAMPLE_CONFIG.exists():
+            print(f"Hint: create it from the template: copy {EXAMPLE_CONFIG.relative_to(PROJECT_ROOT)} "
+                  f"to {args.config} and fill in your companies.", file=sys.stderr)
         return EXIT_CONFIG_ERROR
     if args.output is not None and len(companies) != 1:
         parser.error("--output can only be used when collecting exactly one company.")

@@ -1,11 +1,14 @@
 """Shared helpers for ATS collectors: HTTP JSON fetching and text normalization.
 
-Standard library only. Each provider module (greenhouse.py, ashby.py) builds its
+Standard library only. Each provider module (greenhouse.py, ashby.py, lever.py) builds its
 own URL, validates its own response shape and maps postings to the common
 normalized job schema:
 
     company, ats_provider, ats_job_id, title, location, description,
-    application_url, updated_at
+    application_url, updated_at, published_at
+
+``published_at`` is the employer's publication date (Greenhouse ``first_published``,
+Ashby ``publishedAt``, Lever ``createdAt``) or None; it is never derived from ``updated_at``.
 """
 
 from __future__ import annotations

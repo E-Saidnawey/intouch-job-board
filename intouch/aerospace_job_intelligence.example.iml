@@ -1,0 +1,85 @@
+{
+  "name": "Aerospace Job Intelligence",
+  "description": "Collect, evaluate, generate, verify, and email aerospace job report with persistent detailed logs.",
+  "readme": "TEMPLATE: before importing, replace every C:\\path\\to\\intouch-job-board with the absolute path of your clone (it appears in each task's root= line and command arguments) and replace you@example.com in send-report-email with your address. Check it with: python -m src.intouch_workflow <your .iml>. Runs the pipeline in sequence. Each run creates logs/intouch_<UTC-run-id>.log. Captures full combined subprocess output, timings, exit codes and errors. Email success is logged only if the message task returns successfully. Requires an existing working SMTP configuration and Python project. The schedule is intentionally omitted: configure it manually after validating a test run. WARNING: evaluate-jobs runs batch_evaluator with --call-api, which makes paid Claude API requests; run the evaluator once without --call-api first to see how many. WARNING: The email-confirmed task cannot log an email failure because InTouch stops on a failed message task; inspect InTouch execution history for email failures. Do not run concurrently: the shared current-run marker assumes only one active workflow execution.",
+  "tasks": [
+    {
+      "name": "collect-jobs",
+      "tool": "run_command",
+      "properties": {
+        "environment": "python",
+        "scriptSource": "inline",
+        "successCodes": "0",
+        "timeoutSeconds": 1920,
+        "command": "import os,sys,subprocess,datetime,time,json,traceback,pathlib\nroot=pathlib.Path(r\"C:\\path\\to\\intouch-job-board\")\nlogs=root/'logs'; logs.mkdir(parents=True,exist_ok=True)\nmarker=logs/'intouch_current_run.json'\nstep='collect-jobs'\nnow=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')\nif step=='collect-jobs':\n    run_id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')\n    marker.write_text(json.dumps({'run_id':run_id,'created_utc':now()}),encoding='utf-8')\nelse:\n    if not marker.exists():\n        print('ERROR: no run marker; refusing to run '+step,file=sys.stderr);sys.exit(1)\n    run_id=json.loads(marker.read_text(encoding='utf-8'))['run_id']\nlog=logs/('intouch_'+run_id+'.log')\ndef emit(s):\n    line='['+now()+'] '+s\n    with log.open('a',encoding='utf-8') as f:f.write(line+'\\n')\n    print(line,flush=True)\ntry:\n    emit('START '+step+' run_id='+run_id)\n    t=time.monotonic()\n    if step=='verify-report':\n        report=root/'reports'/'job_intelligence.html'\n        stat=report.stat()\n        if stat.st_size<=0:raise RuntimeError('Report is empty')\n        emit('REPORT_OK path='+str(report)+' bytes='+str(stat.st_size)+' modified_utc='+datetime.datetime.fromtimestamp(stat.st_mtime,datetime.timezone.utc).isoformat())\n        rc=0\n    elif step=='email-confirmed':\n        emit('EMAIL_TASK_RETURNED_SUCCESS (InTouch message task completed)')\n        rc=0\n    else:\n        args=['C:\\\\path\\\\to\\\\intouch-job-board\\\\.venv\\\\Scripts\\\\python.exe', '-m', 'src.collect_jobs', '--all', '--db', 'C:\\\\path\\\\to\\\\intouch-job-board\\\\data\\\\jobs.db']\n        emit('COMMAND '+repr(args)+' cwd='+str(root))\n        p=subprocess.Popen(args,cwd=str(root),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1)\n        try:\n            for line in p.stdout:\n                emit('OUTPUT '+line.rstrip('\\r\\n'))\n            rc=p.wait(timeout=1800)\n        except subprocess.TimeoutExpired:\n            p.kill();p.wait();emit('TIMEOUT after '+str(1800)+' seconds');rc=124\n    emit('END '+step+' status='+('SUCCESS' if rc==0 else 'FAILED')+' exit_code='+str(rc)+' duration_sec='+str(round(time.monotonic()-t,2)))\n    sys.exit(rc)\nexcept Exception as e:\n    emit('FAILED '+step+' error='+repr(e)+' traceback='+traceback.format_exc().replace('\\n',' | '))\n    sys.exit(1)\n",
+        "args": "",
+        "credentialEnvVarOverrides": {},
+        "credentialNames": [],
+        "envVars": {},
+        "environmentVariables": "",
+        "outputFile": "",
+        "script": ""
+      },
+      "environment": "shell"
+    },
+    {
+      "name": "evaluate-jobs",
+      "tool": "run_command",
+      "properties": {
+        "environment": "python",
+        "scriptSource": "inline",
+        "successCodes": "0",
+        "timeoutSeconds": 3720,
+        "command": "import os,sys,subprocess,datetime,time,json,traceback,pathlib\nroot=pathlib.Path(r\"C:\\path\\to\\intouch-job-board\")\nlogs=root/'logs'; logs.mkdir(parents=True,exist_ok=True)\nmarker=logs/'intouch_current_run.json'\nstep='evaluate-jobs'\nnow=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')\nif step=='collect-jobs':\n    run_id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')\n    marker.write_text(json.dumps({'run_id':run_id,'created_utc':now()}),encoding='utf-8')\nelse:\n    if not marker.exists():\n        print('ERROR: no run marker; refusing to run '+step,file=sys.stderr);sys.exit(1)\n    run_id=json.loads(marker.read_text(encoding='utf-8'))['run_id']\nlog=logs/('intouch_'+run_id+'.log')\ndef emit(s):\n    line='['+now()+'] '+s\n    with log.open('a',encoding='utf-8') as f:f.write(line+'\\n')\n    print(line,flush=True)\ntry:\n    emit('START '+step+' run_id='+run_id)\n    t=time.monotonic()\n    if step=='verify-report':\n        report=root/'reports'/'job_intelligence.html'\n        stat=report.stat()\n        if stat.st_size<=0:raise RuntimeError('Report is empty')\n        emit('REPORT_OK path='+str(report)+' bytes='+str(stat.st_size)+' modified_utc='+datetime.datetime.fromtimestamp(stat.st_mtime,datetime.timezone.utc).isoformat())\n        rc=0\n    elif step=='email-confirmed':\n        emit('EMAIL_TASK_RETURNED_SUCCESS (InTouch message task completed)')\n        rc=0\n    else:\n        args=['C:\\\\path\\\\to\\\\intouch-job-board\\\\.venv\\\\Scripts\\\\python.exe', '-m', 'src.batch_evaluator', '--profile', 'config/claude_candidate_profile.json', '--call-api']\n        emit('COMMAND '+repr(args)+' cwd='+str(root))\n        p=subprocess.Popen(args,cwd=str(root),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1)\n        try:\n            for line in p.stdout:\n                emit('OUTPUT '+line.rstrip('\\r\\n'))\n            rc=p.wait(timeout=3600)\n        except subprocess.TimeoutExpired:\n            p.kill();p.wait();emit('TIMEOUT after '+str(3600)+' seconds');rc=124\n    emit('END '+step+' status='+('SUCCESS' if rc==0 else 'FAILED')+' exit_code='+str(rc)+' duration_sec='+str(round(time.monotonic()-t,2)))\n    sys.exit(rc)\nexcept Exception as e:\n    emit('FAILED '+step+' error='+repr(e)+' traceback='+traceback.format_exc().replace('\\n',' | '))\n    sys.exit(1)\n"
+      },
+      "environment": "shell"
+    },
+    {
+      "name": "generate-report",
+      "tool": "run_command",
+      "properties": {
+        "environment": "python",
+        "scriptSource": "inline",
+        "successCodes": "0",
+        "timeoutSeconds": 1920,
+        "command": "import os,sys,subprocess,datetime,time,json,traceback,pathlib\nroot=pathlib.Path(r\"C:\\path\\to\\intouch-job-board\")\nlogs=root/'logs'; logs.mkdir(parents=True,exist_ok=True)\nmarker=logs/'intouch_current_run.json'\nstep='generate-report'\nnow=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')\nif step=='collect-jobs':\n    run_id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')\n    marker.write_text(json.dumps({'run_id':run_id,'created_utc':now()}),encoding='utf-8')\nelse:\n    if not marker.exists():\n        print('ERROR: no run marker; refusing to run '+step,file=sys.stderr);sys.exit(1)\n    run_id=json.loads(marker.read_text(encoding='utf-8'))['run_id']\nlog=logs/('intouch_'+run_id+'.log')\ndef emit(s):\n    line='['+now()+'] '+s\n    with log.open('a',encoding='utf-8') as f:f.write(line+'\\n')\n    print(line,flush=True)\ntry:\n    emit('START '+step+' run_id='+run_id)\n    t=time.monotonic()\n    if step=='verify-report':\n        report=root/'reports'/'job_intelligence.html'\n        stat=report.stat()\n        if stat.st_size<=0:raise RuntimeError('Report is empty')\n        emit('REPORT_OK path='+str(report)+' bytes='+str(stat.st_size)+' modified_utc='+datetime.datetime.fromtimestamp(stat.st_mtime,datetime.timezone.utc).isoformat())\n        rc=0\n    elif step=='email-confirmed':\n        emit('EMAIL_TASK_RETURNED_SUCCESS (InTouch message task completed)')\n        rc=0\n    else:\n        args=['C:\\\\path\\\\to\\\\intouch-job-board\\\\.venv\\\\Scripts\\\\python.exe', '-m', 'src.generate_report', '--profile', 'config/claude_candidate_profile.json']\n        emit('COMMAND '+repr(args)+' cwd='+str(root))\n        p=subprocess.Popen(args,cwd=str(root),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1)\n        try:\n            for line in p.stdout:\n                emit('OUTPUT '+line.rstrip('\\r\\n'))\n            rc=p.wait(timeout=1800)\n        except subprocess.TimeoutExpired:\n            p.kill();p.wait();emit('TIMEOUT after '+str(1800)+' seconds');rc=124\n    emit('END '+step+' status='+('SUCCESS' if rc==0 else 'FAILED')+' exit_code='+str(rc)+' duration_sec='+str(round(time.monotonic()-t,2)))\n    sys.exit(rc)\nexcept Exception as e:\n    emit('FAILED '+step+' error='+repr(e)+' traceback='+traceback.format_exc().replace('\\n',' | '))\n    sys.exit(1)\n"
+      },
+      "environment": "shell"
+    },
+    {
+      "name": "verify-report",
+      "tool": "run_command",
+      "properties": {
+        "environment": "python",
+        "scriptSource": "inline",
+        "successCodes": "0",
+        "timeoutSeconds": 1920,
+        "command": "import os,sys,subprocess,datetime,time,json,traceback,pathlib\nroot=pathlib.Path(r\"C:\\path\\to\\intouch-job-board\")\nlogs=root/'logs'; logs.mkdir(parents=True,exist_ok=True)\nmarker=logs/'intouch_current_run.json'\nstep='verify-report'\nnow=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')\nif step=='collect-jobs':\n    run_id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')\n    marker.write_text(json.dumps({'run_id':run_id,'created_utc':now()}),encoding='utf-8')\nelse:\n    if not marker.exists():\n        print('ERROR: no run marker; refusing to run '+step,file=sys.stderr);sys.exit(1)\n    run_id=json.loads(marker.read_text(encoding='utf-8'))['run_id']\nlog=logs/('intouch_'+run_id+'.log')\ndef emit(s):\n    line='['+now()+'] '+s\n    with log.open('a',encoding='utf-8') as f:f.write(line+'\\n')\n    print(line,flush=True)\ntry:\n    emit('START '+step+' run_id='+run_id)\n    t=time.monotonic()\n    if step=='verify-report':\n        report=root/'reports'/'job_intelligence.html'\n        stat=report.stat()\n        if stat.st_size<=0:raise RuntimeError('Report is empty')\n        emit('REPORT_OK path='+str(report)+' bytes='+str(stat.st_size)+' modified_utc='+datetime.datetime.fromtimestamp(stat.st_mtime,datetime.timezone.utc).isoformat())\n        rc=0\n    elif step=='email-confirmed':\n        emit('EMAIL_TASK_RETURNED_SUCCESS (InTouch message task completed)')\n        rc=0\n    else:\n        args=['C:\\\\path\\\\to\\\\intouch-job-board\\\\.venv\\\\Scripts\\\\python.exe']\n        emit('COMMAND '+repr(args)+' cwd='+str(root))\n        p=subprocess.Popen(args,cwd=str(root),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1)\n        try:\n            for line in p.stdout:\n                emit('OUTPUT '+line.rstrip('\\r\\n'))\n            rc=p.wait(timeout=1800)\n        except subprocess.TimeoutExpired:\n            p.kill();p.wait();emit('TIMEOUT after '+str(1800)+' seconds');rc=124\n    emit('END '+step+' status='+('SUCCESS' if rc==0 else 'FAILED')+' exit_code='+str(rc)+' duration_sec='+str(round(time.monotonic()-t,2)))\n    sys.exit(rc)\nexcept Exception as e:\n    emit('FAILED '+step+' error='+repr(e)+' traceback='+traceback.format_exc().replace('\\n',' | '))\n    sys.exit(1)\n"
+      },
+      "environment": "shell"
+    },
+    {
+      "name": "send-report-email",
+      "tool": "message",
+      "properties": {
+        "to": "you@example.com",
+        "subject": "Aerospace Job Intelligence — Daily Report",
+        "bodyType": "text",
+        "body": "Your latest aerospace job intelligence report is attached.",
+        "attachments": "C:\\path\\to\\intouch-job-board\\reports\\job_intelligence.html"
+      }
+    },
+    {
+      "name": "email-confirmed",
+      "tool": "run_command",
+      "properties": {
+        "environment": "python",
+        "scriptSource": "inline",
+        "successCodes": "0",
+        "timeoutSeconds": 1920,
+        "command": "import os,sys,subprocess,datetime,time,json,traceback,pathlib\nroot=pathlib.Path(r\"C:\\path\\to\\intouch-job-board\")\nlogs=root/'logs'; logs.mkdir(parents=True,exist_ok=True)\nmarker=logs/'intouch_current_run.json'\nstep='email-confirmed'\nnow=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')\nif step=='collect-jobs':\n    run_id=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')\n    marker.write_text(json.dumps({'run_id':run_id,'created_utc':now()}),encoding='utf-8')\nelse:\n    if not marker.exists():\n        print('ERROR: no run marker; refusing to run '+step,file=sys.stderr);sys.exit(1)\n    run_id=json.loads(marker.read_text(encoding='utf-8'))['run_id']\nlog=logs/('intouch_'+run_id+'.log')\ndef emit(s):\n    line='['+now()+'] '+s\n    with log.open('a',encoding='utf-8') as f:f.write(line+'\\n')\n    print(line,flush=True)\ntry:\n    emit('START '+step+' run_id='+run_id)\n    t=time.monotonic()\n    if step=='verify-report':\n        report=root/'reports'/'job_intelligence.html'\n        stat=report.stat()\n        if stat.st_size<=0:raise RuntimeError('Report is empty')\n        emit('REPORT_OK path='+str(report)+' bytes='+str(stat.st_size)+' modified_utc='+datetime.datetime.fromtimestamp(stat.st_mtime,datetime.timezone.utc).isoformat())\n        rc=0\n    elif step=='email-confirmed':\n        emit('EMAIL_TASK_RETURNED_SUCCESS (InTouch message task completed)')\n        rc=0\n    else:\n        args=['C:\\\\path\\\\to\\\\intouch-job-board\\\\.venv\\\\Scripts\\\\python.exe']\n        emit('COMMAND '+repr(args)+' cwd='+str(root))\n        p=subprocess.Popen(args,cwd=str(root),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1)\n        try:\n            for line in p.stdout:\n                emit('OUTPUT '+line.rstrip('\\r\\n'))\n            rc=p.wait(timeout=1800)\n        except subprocess.TimeoutExpired:\n            p.kill();p.wait();emit('TIMEOUT after '+str(1800)+' seconds');rc=124\n    emit('END '+step+' status='+('SUCCESS' if rc==0 else 'FAILED')+' exit_code='+str(rc)+' duration_sec='+str(round(time.monotonic()-t,2)))\n    sys.exit(rc)\nexcept Exception as e:\n    emit('FAILED '+step+' error='+repr(e)+' traceback='+traceback.format_exc().replace('\\n',' | '))\n    sys.exit(1)\n"
+      },
+      "environment": "shell"
+    }
+  ]
+}
