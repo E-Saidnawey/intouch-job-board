@@ -3,6 +3,12 @@
 Reuses the single-job evaluator (``src.claude_evaluator``): the same prompt, structured
 output schema, validation, location policy and the same SQLite evaluation cache.
 
+* Only jobs the employer published within the last ``--max-age-days`` (default 30,
+  UTC, boundary inclusive) are evaluated -- the same cutoff the report applies, using the
+  same publication dates (latest ``data/*_jobs.json`` snapshot first, then the database's
+  ``source_published_at``). Jobs with a missing or unverified publication date are
+  skipped too. ``updated_at`` and first/last-seen times are never substituted. Nothing is
+  deleted; older jobs are simply not sent to Claude.
 * Dry run by default: lists the jobs that would be evaluated and makes no request.
   The dry run opens the database read-only and never creates or migrates anything.
 * ``--call-api`` evaluates each new or changed posting with one request per job, one
@@ -31,10 +37,11 @@ import sqlite3
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src import database, location_filter, relevance_filter
+from src import database, location_filter, posting_dates, relevance_filter
 from src.candidate_profile import ProfileError, load_profile
 from src.claude_evaluator import (
     DEFAULT_DB, DEFAULT_EFFORT, DEFAULT_MAX_RETRIES, DEFAULT_MODEL, DEFAULT_TIMEOUT_SECONDS, EFFORT_LEVELS,
@@ -47,11 +54,14 @@ from src.evaluation_store import EvaluationStoreError, ensure_schema, find_cache
 ELIGIBLE_LOCATIONS = relevance_filter.ELIGIBLE_LOCATIONS          # compatible, review, boston_hybrid
 ELIGIBLE_RELEVANCE = (relevance_filter.HIGH, relevance_filter.MEDIUM)
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 5
+DEFAULT_MAX_AGE_DAYS = posting_dates.DEFAULT_MAX_AGE_DAYS
 
 # Reasons a job is skipped without any API request.
 SKIP_LOCATION = "location not eligible"
 SKIP_RELEVANCE = "low title relevance"
 SKIP_INVALID = "incomplete job record"
+SKIP_TOO_OLD = "published before the posting-date cutoff"
+SKIP_UNKNOWN_DATE = "missing or unverified publication date"
 
 
 @dataclass
@@ -73,6 +83,8 @@ class BatchPlan:
     cached: list[Candidate] = field(default_factory=list)    # current cached evaluation exists
     skipped: Counter = field(default_factory=Counter)        # reason -> count
     active_jobs: int = 0
+    max_age_days: int | None = None                          # None: no posting-date cutoff
+    cutoff: datetime | None = None                           # earliest publication instant kept
 
     @property
     def skipped_total(self) -> int:
@@ -95,10 +107,13 @@ class BatchResult:
 # --------------------------------------------------------------------------- #
 
 def load_active_jobs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    # Databases created before the publication-date column are read as-is: no migration.
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    published = f"j.{database.PUBLISHED_COLUMN}" if database.PUBLISHED_COLUMN in columns else "NULL"
     rows = conn.execute(
-        """
+        f"""
         SELECT j.id AS job_id, c.name AS company, c.ats_provider, j.ats_job_id, j.title, j.location,
-               j.description, j.application_url
+               j.description, j.application_url, {published} AS source_published_at
         FROM jobs j JOIN companies c ON c.id = j.company_id
         WHERE j.is_active = 1
         ORDER BY c.name, j.title, j.id
@@ -107,11 +122,28 @@ def load_active_jobs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def select_eligible(jobs: list[dict[str, Any]]) -> tuple[list[Candidate], Counter]:
-    """Geographically eligible jobs with HIGH or MEDIUM title relevance, best first."""
+def select_eligible(jobs: list[dict[str, Any]], *, max_age_days: int | None = None, now: datetime | None = None,
+                    snapshot_dates: dict[posting_dates.SnapshotKey, str] | None = None,
+                    ) -> tuple[list[Candidate], Counter]:
+    """Geographically eligible jobs with HIGH or MEDIUM title relevance, best first.
+
+    With ``max_age_days`` set, jobs published before ``now - max_age_days`` or without a
+    verified publication date are skipped first (exactly as the report does).
+    """
     skipped: Counter = Counter()
     selected: list[Candidate] = []
+    if max_age_days is not None:
+        now = now or datetime.now(timezone.utc)
     for job in jobs:
+        if max_age_days is not None:
+            published = posting_dates.resolve_job_published_at(job, snapshot_dates)
+            age = posting_dates.classify_age(published, now, max_age_days)
+            if age == posting_dates.TOO_OLD:
+                skipped[SKIP_TOO_OLD] += 1
+                continue
+            if age == posting_dates.UNKNOWN:
+                skipped[SKIP_UNKNOWN_DATE] += 1
+                continue
         loc = location_filter.classify_location(job.get("location"))["classification"]
         if loc not in ELIGIBLE_LOCATIONS:
             skipped[SKIP_LOCATION] += 1
@@ -127,11 +159,19 @@ def select_eligible(jobs: list[dict[str, Any]]) -> tuple[list[Candidate], Counte
 
 
 def plan_batch(conn: sqlite3.Connection, profile: dict[str, Any], config: EvaluatorConfig,
-               limit: int | None = None) -> BatchPlan:
-    """Split eligible jobs into cached / pending / skipped. Read-only (works on a ``mode=ro`` connection)."""
+               limit: int | None = None, *, max_age_days: int | None = None, now: datetime | None = None,
+               snapshot_dates: dict[posting_dates.SnapshotKey, str] | None = None) -> BatchPlan:
+    """Split eligible jobs into cached / pending / skipped. Read-only (works on a ``mode=ro`` connection).
+
+    ``max_age_days`` (None = no cutoff) applies the posting-date cutoff; the CLI passes 30 by default.
+    """
     jobs = load_active_jobs(conn)
-    selected, skipped = select_eligible(jobs)
-    plan = BatchPlan(skipped=skipped, active_jobs=len(jobs))
+    cutoff = None
+    if max_age_days is not None:
+        now = now or datetime.now(timezone.utc)
+        cutoff = posting_dates.cutoff_instant(now, max_age_days)
+    selected, skipped = select_eligible(jobs, max_age_days=max_age_days, now=now, snapshot_dates=snapshot_dates)
+    plan = BatchPlan(skipped=skipped, active_jobs=len(jobs), max_age_days=max_age_days, cutoff=cutoff)
     for cand in selected:
         try:
             validate_job_record(cand.job)
@@ -247,12 +287,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES, help=f"SDK retries (0-{MAX_RETRIES_CAP})")
     p.add_argument("--max-description-chars", type=int, default=None,
                    help="optional cap on description length (default: send the full description)")
+    p.add_argument("--max-age-days", type=_positive_int, default=DEFAULT_MAX_AGE_DAYS,
+                   help=f"only evaluate jobs the employer published in the last N days (default {DEFAULT_MAX_AGE_DAYS}); "
+                        "jobs without a verified publication date are skipped")
+    p.add_argument("--data-dir", type=Path, default=None,
+                   help="directory of *_jobs.json snapshots used for publication dates "
+                        "(default: the database's directory)")
     return p
 
 
 def _print_plan(plan: BatchPlan, config: EvaluatorConfig, out) -> None:
     print(f"Model: {config.model} (effort {config.effort}, schema v{EVALUATION_SCHEMA_VERSION})", file=out)
     print(f"Active jobs: {plan.active_jobs}", file=out)
+    if plan.max_age_days is not None and plan.cutoff is not None:
+        print(f"Posting-date cutoff: published on/after {plan.cutoff.isoformat(timespec='seconds')} "
+              f"(last {plan.max_age_days} days); older or undated jobs are skipped, not deleted", file=out)
     print(f"Eligible (location + HIGH/MEDIUM relevance): {len(plan.pending) + len(plan.cached)}", file=out)
     print(f"  already evaluated (cached): {len(plan.cached)}", file=out)
     print(f"  need evaluation:            {len(plan.pending)}", file=out)
@@ -289,10 +338,15 @@ def main(argv: list[str] | None = None, *, client_factory=make_client) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    snapshot_warnings: list[str] = []
+    data_dir = args.data_dir if args.data_dir is not None else args.db.parent
+    snapshot_dates = posting_dates.load_snapshot_published_dates(data_dir, snapshot_warnings)
+
     try:
         ro = location_filter.open_readonly(args.db)
         try:
-            plan = plan_batch(ro, profile, config, args.limit)
+            plan = plan_batch(ro, profile, config, args.limit, max_age_days=args.max_age_days,
+                              snapshot_dates=snapshot_dates)
         finally:
             ro.close()
     except (EvaluationStoreError, sqlite3.Error) as exc:
@@ -301,6 +355,8 @@ def main(argv: list[str] | None = None, *, client_factory=make_client) -> int:
 
     api_key = load_api_key() if plan.pending else None
     _print_plan(plan, config, out)
+    for warning in snapshot_warnings:
+        print(f"Note: {warning}", file=out)
 
     if not args.call_api:
         if plan.pending:

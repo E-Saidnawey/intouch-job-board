@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -37,11 +38,17 @@ JOBS = [
 ]
 
 
-def job_row(ats_job_id, company, title, location, description=None):
+# Reference time for report data; fixture jobs were published two days earlier (inside the 30-day window).
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
+RECENTLY_PUBLISHED = (NOW - timedelta(days=2)).isoformat()
+
+
+def job_row(ats_job_id, company, title, location, description=None, published_at=RECENTLY_PUBLISHED):
     return {
         "company": company, "ats_provider": "greenhouse", "ats_job_id": ats_job_id, "title": title,
         "location": location, "description": description or f"Description for {title}.",
         "application_url": f"https://example.invalid/jobs/{ats_job_id}", "updated_at": None,
+        "published_at": published_at,
     }
 
 
@@ -83,7 +90,7 @@ class ReportTestCase(unittest.TestCase):
     def data(self, inputs: gr.CurrentInputs | None = None) -> gr.ReportData:
         conn = gr.open_readonly(self.db_path)
         try:
-            return gr.build_report_data(conn, inputs or self.inputs, generated_at="2026-11-23T00:00:00+00:00")
+            return gr.build_report_data(conn, inputs or self.inputs, generated_at=NOW.isoformat())
         finally:
             conn.close()
 
@@ -407,11 +414,20 @@ class HtmlTests(ReportTestCase):
         self.assertIn('data-location="compatible"', card)
         self.assertIn('data-relevance="high"', card)
         self.assertIn('data-recommendation="Apply"', card)
-        self.assertIn('data-search="alpha orbital satellite operations engineer new york, ny"', card)
+        self.assertIn('data-search="alpha orbital satellite operations engineer"', card)  # company + title
+        self.assertIn('data-uid="greenhouse|Alpha Orbital|1"', card)  # provider | employer | posting id
+        self.assertIn('data-location-text="New York, NY"', card)
+        self.assertIn('data-score="78"', card)
+        self.assertIn(f'data-published="{int((NOW - timedelta(days=2)).timestamp() * 1000)}"', card)
+        self.assertIn('data-match-rank="1"', card)
         boston = _card_for(page, "Software Engineer")
         self.assertIn('data-location="boston_hybrid"', boston)
         self.assertIn('data-recommendation="none"', boston)
-        for select_id in ("f-company", "f-location", "f-relevance", "f-recommendation"):
+        self.assertIn('data-score=""', boston)  # not evaluated: excluded by any minimum score
+        self.assertIn('<option value="Boston, MA (Hybrid)">', page)  # location filter by place
+        self.assertIn('<option value="70">70+</option>', page)
+        for select_id in ("f-company", "f-location-text", "f-location", "f-relevance", "f-recommendation",
+                          "f-min-score", "f-sort"):
             self.assertIn(f'id="{select_id}"', page)
         self.assertIn('<option value="boston_hybrid">', page)
         self.assertIn('<option value="none">Not evaluated</option>', page)
@@ -430,8 +446,9 @@ class HtmlTests(ReportTestCase):
         card = _card_for(gr.render_html(self.data()), "Satellite Operations Engineer")
         collapsed = card.split("<details>", 1)[0] + card.split("</details>", 1)[1]
         text = _visible_text(collapsed)
-        expected = ["#1", "Alpha Orbital", "Satellite Operations Engineer", "78", "/100 fit", "New York, NY",
-                    "Compatible", "Title relevance: high", "Application page"]
+        expected = ["#1", "Alpha Orbital", "Satellite Operations Engineer", "78", "/100 fit", "Posted",
+                    (NOW - timedelta(days=2)).strftime("%Y-%m-%d"), "· 2 days ago", "New York, NY",
+                    "Compatible", "Title relevance: high", "Application page", "Mark as seen"]
         for item in expected:
             self.assertIn(item, text)
             text = text.replace(item, " ", 1)
@@ -456,8 +473,8 @@ class HtmlTests(ReportTestCase):
         self.save("1", valid_evaluation(recommendation="Apply"))
         card = _card_for(gr.render_html(self.data()), "Satellite Operations Engineer")
         markers = ['class="rank">#1', 'class="company">Alpha Orbital', "<h3>Satellite Operations Engineer",
-                   "/100 fit", "New York, NY", "Compatible", "Title relevance: high", "Application page",
-                   "<details>", "Key responsibilities", "Matched skills", "Missing qualifications",
+                   "/100 fit", 'class="posted"', "<span>New York, NY", "Compatible", "Title relevance: high",
+                   "Application page", 'class="seen-toggle"', "<details>", "Key responsibilities", "Matched skills", "Missing qualifications",
                    "Transferable skills"]
         positions = [card.index(m) for m in markers]
         self.assertEqual(positions, sorted(positions), dict(zip(markers, positions)))
@@ -485,8 +502,9 @@ class HtmlTests(ReportTestCase):
     def test_unevaluated_card_stays_compact(self):
         card = _card_for(gr.render_html(self.data()), "Payload Systems Engineer")
         text = _visible_text(card)
-        for item in ("#2", "Beta Space", "Payload Systems Engineer", "Not evaluated", "Remote", "Needs review",
-                     "Title relevance: high", "Application page"):
+        for item in ("#2", "Beta Space", "Payload Systems Engineer", "Not evaluated", "Posted",
+                     (NOW - timedelta(days=2)).strftime("%Y-%m-%d"), "· 2 days ago", "Remote", "Needs review",
+                     "Title relevance: high", "Application page", "Mark as seen"):
             self.assertIn(item, text)
             text = text.replace(item, " ", 1)
         self.assertEqual(text.strip(), "")
@@ -508,13 +526,15 @@ class HtmlTests(ReportTestCase):
         self.save("1", valid_evaluation(recommendation="Skip"))
         page = gr.render_html(self.data())
         script = re.search(r"<script>(.*?)</script>", page, flags=re.S).group(1)
-        for needle in ("'q'", "'f-company'", "'f-location'", "'f-relevance'", "'f-recommendation'",
-                       "'company', 'location', 'relevance', 'recommendation'", "dataset.search"):
+        for needle in ("'q'", "'f-company'", "'f-location-text'", "'f-location'", "'f-relevance'",
+                       "'f-recommendation'", "'f-min-score'", "'f-sort'", "dataset.search", "localStorage",
+                       "card.dataset.uid", "var view = 'unseen'"):
             self.assertIn(needle, script)
         cards = re.findall(r"<article class=\"job\"(.*?)>", page, flags=re.S)
         self.assertEqual(len(cards), 5)
         for attrs in cards:
-            for attr in ("data-company=", "data-location=", "data-relevance=", "data-recommendation=",
+            for attr in ("data-uid=", "data-company=", "data-location=", "data-location-text=", "data-relevance=",
+                         "data-recommendation=", "data-score=", "data-published=", "data-match-rank=",
                          "data-search="):
                 self.assertIn(attr, attrs)
         self.assertIn('<option value="Skip">Skip</option>', page)

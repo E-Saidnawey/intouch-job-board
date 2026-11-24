@@ -44,6 +44,7 @@ FULL_JOB = {
     "location": {"name": "Mountain View, CA"},
     "absolute_url": "https://job-boards.greenhouse.io/muonspace/jobs/4012345",
     "updated_at": "2026-11-01T10:15:00-04:00",
+    "first_published": "2026-10-20T09:00:00-04:00",
     "company_name": "Muon Space",
     # Greenhouse returns content entity-escaped HTML.
     "content": "&lt;h2&gt;About&lt;/h2&gt;&lt;p&gt;Design &amp;amp; test&amp;nbsp;GNC.&lt;/p&gt;"
@@ -75,6 +76,7 @@ class FetchGreenhouseJobsTests(unittest.TestCase):
                 "description": "About\n\nDesign & test GNC.\n\n- MATLAB\n- C++",
                 "application_url": "https://job-boards.greenhouse.io/muonspace/jobs/4012345",
                 "updated_at": "2026-11-01T10:15:00-04:00",
+                "published_at": "2026-10-20T09:00:00-04:00",  # first_published, not updated_at
             },
         )
 
@@ -90,6 +92,7 @@ class FetchGreenhouseJobsTests(unittest.TestCase):
         self.assertIsNone(job["location"])
         self.assertIsNone(job["application_url"])
         self.assertIsNone(job["updated_at"])  # never invented
+        self.assertIsNone(job["published_at"])  # never invented
         self.assertEqual(job["description"], "")
 
     def test_null_and_wrong_typed_optional_fields(self):
@@ -147,10 +150,19 @@ class HtmlToTextTests(unittest.TestCase):
         self.assertEqual(html_to_text(""), "")
 
 
+def write_temp_config(directory: Path) -> Path:
+    """A one-company config so these tests never depend on the personal config/companies.json."""
+    path = directory / "companies.json"
+    path.write_text(json.dumps({"companies": [
+        {"name": "Muon Space", "ats_provider": "greenhouse", "board_token": "muonspace"}]}), encoding="utf-8")
+    return path
+
+
 class CollectJobsTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.out = Path(self._tmp.name) / "data" / "muon_space_jobs.json"
+        self.config = write_temp_config(Path(self._tmp.name))
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -158,7 +170,7 @@ class CollectJobsTests(unittest.TestCase):
     def run_main(self, *args):
         stdout, stderr = io.StringIO(), io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            code = collect_jobs.main(["--output", str(self.out), *args])
+            code = collect_jobs.main(["--config", str(self.config), "--output", str(self.out), *args])
         return code, stdout.getvalue(), stderr.getvalue()
 
     def test_writes_snapshot_with_collected_at(self):

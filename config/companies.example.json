@@ -1,0 +1,23 @@
+{
+  "_instructions": "Template. Copy to config/companies.json (git-ignored), replace the placeholders with real job boards and set enabled to true. board_token is the board slug: boards.greenhouse.io/<token>, jobs.ashbyhq.com/<token> or jobs.lever.co/<site>. Verify each token returns postings before enabling it. Keys starting with '_' are ignored.",
+  "companies": [
+    {
+      "name": "Example Greenhouse Company",
+      "ats_provider": "greenhouse",
+      "board_token": "your-greenhouse-board-token",
+      "enabled": false
+    },
+    {
+      "name": "Example Ashby Company",
+      "ats_provider": "ashby",
+      "board_token": "your-ashby-board-token",
+      "enabled": false
+    },
+    {
+      "name": "Example Lever Company",
+      "ats_provider": "lever",
+      "board_token": "your-lever-site",
+      "enabled": false
+    }
+  ]
+}

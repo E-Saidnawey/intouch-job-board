@@ -1,0 +1,4 @@
+# Collection, the database and the report use only the standard library.
+# These are needed for the Claude evaluators and the test suite.
+anthropic==2.12.0
+python-dotenv==1.2.4

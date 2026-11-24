@@ -13,3 +13,14 @@ config/claude_candidate_profile.json
 
 # Generated reports may contain personalized AI evaluations; never commit.
 reports/
+
+# Local run logs (InTouch workflow output, ad-hoc collection logs); never commit.
+logs/
+*.log
+
+# Personal company list; the public template is config/companies.example.json.
+config/companies.json
+
+# Personal InTouch AI workflows (real paths and email). The cleaned template is tracked.
+*.iml
+!*.example.iml

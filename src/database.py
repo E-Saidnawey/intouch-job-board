@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS jobs (
 # Fields that come from the ATS; a difference in any of them is a "change".
 SOURCE_FIELDS = ("title", "location", "description", "application_url", "source_updated_at")
 
+# Employer publication date (Greenhouse first_published / Ashby publishedAt). Added to
+# existing databases as a nullable column; it is not a change-detection field, so
+# adding it never bumps last_changed_at, and a missing value never erases a stored one.
+PUBLISHED_COLUMN = "source_published_at"
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -57,7 +62,21 @@ def initialize_database(db_path: str | Path) -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(db_path)
     conn.executescript(SCHEMA)
+    ensure_published_column(conn)
     return conn
+
+
+def ensure_published_column(conn: sqlite3.Connection) -> bool:
+    """Add the nullable ``source_published_at`` column if missing. Returns True if added.
+
+    Purely additive (``ALTER TABLE ... ADD COLUMN``): existing rows are kept with NULL.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if PUBLISHED_COLUMN in columns:
+        return False
+    with _Transaction(conn):
+        conn.execute(f"ALTER TABLE jobs ADD COLUMN {PUBLISHED_COLUMN} TEXT")
+    return True
 
 
 class _Transaction:
@@ -113,10 +132,13 @@ def upsert_jobs(
     - Existing job, any source field differs: source fields, last_seen_at and
       last_changed_at are updated. first_seen_at is never modified.
 
-    Jobs absent from ``jobs`` are left untouched (not marked inactive).
+    ``published_at`` (employer publication date) is stored in ``source_published_at``
+    when present; a missing value never overwrites a stored one, and it does not
+    count as a change. Jobs absent from ``jobs`` are left untouched (not marked inactive).
     Any error rolls back the whole batch. Returns inserted/updated/unchanged counts.
     """
     seen_at = seen_at or utc_now()
+    ensure_published_column(conn)
     counts = {"inserted": 0, "updated": 0, "unchanged": 0}
 
     with _Transaction(conn):
@@ -126,6 +148,8 @@ def upsert_jobs(
                 raise ValueError(f"Job missing ats_job_id: {job!r:.80}")
             ats_job_id = str(ats_job_id)
             new_values = _source_values(job)
+            published = job.get("published_at")
+            published = published.strip() if isinstance(published, str) and published.strip() else None
 
             existing = conn.execute(
                 f"SELECT id, {', '.join(SOURCE_FIELDS)} FROM jobs WHERE company_id = ? AND ats_job_id = ?",
@@ -136,21 +160,26 @@ def upsert_jobs(
                 conn.execute(
                     f"""
                     INSERT INTO jobs (company_id, ats_job_id, {', '.join(SOURCE_FIELDS)},
-                                      first_seen_at, last_seen_at, last_changed_at)
-                    VALUES (?, ?, {', '.join('?' * len(SOURCE_FIELDS))}, ?, ?, ?)
+                                      first_seen_at, last_seen_at, last_changed_at, {PUBLISHED_COLUMN})
+                    VALUES (?, ?, {', '.join('?' * len(SOURCE_FIELDS))}, ?, ?, ?, ?)
                     """,
-                    (company_id, ats_job_id, *new_values, seen_at, seen_at, seen_at),
+                    (company_id, ats_job_id, *new_values, seen_at, seen_at, seen_at, published),
                 )
                 counts["inserted"] += 1
             elif tuple(existing[f] for f in SOURCE_FIELDS) != new_values:
                 assignments = ", ".join(f"{f} = ?" for f in SOURCE_FIELDS)
                 conn.execute(
-                    f"UPDATE jobs SET {assignments}, last_seen_at = ?, last_changed_at = ? WHERE id = ?",
-                    (*new_values, seen_at, seen_at, existing["id"]),
+                    f"UPDATE jobs SET {assignments}, last_seen_at = ?, last_changed_at = ?, "
+                    f"{PUBLISHED_COLUMN} = COALESCE(?, {PUBLISHED_COLUMN}) WHERE id = ?",
+                    (*new_values, seen_at, seen_at, published, existing["id"]),
                 )
                 counts["updated"] += 1
             else:
-                conn.execute("UPDATE jobs SET last_seen_at = ? WHERE id = ?", (seen_at, existing["id"]))
+                conn.execute(
+                    f"UPDATE jobs SET last_seen_at = ?, {PUBLISHED_COLUMN} = COALESCE(?, {PUBLISHED_COLUMN}) "
+                    "WHERE id = ?",
+                    (seen_at, published, existing["id"]),
+                )
                 counts["unchanged"] += 1
 
     return counts
